@@ -1,12 +1,61 @@
 import PySimpleGUI as sg
 import webbrowser
 import os
+import io
+import json
+import psycopg2
+import requests
+from io import BytesIO
+from PIL import Image
+from pprint import pprint
+
+working_directory = os.getcwd()
+
+API_KEY = "2b10Xq0KJm9iGzfiEiSUf6qf6"
+PROJECT = "all"
+api_endpoint = f"https://my-api.plantnet.org/v2/identify/{PROJECT}?api-key={API_KEY}&lang=pt&include-related-images=true"
+data = { 'organs': ['auto'] }
 
 username = ''
 password = ''
+email = ''
+usuarios = ''
 VERDE = '#033814'
 HIPERTEXTO = '#633414'
 LINEBREAK = '#138046'
+
+usuarioLogado = ''
+json_result = ''
+
+conexao = psycopg2.connect(database = "Ribercerra",
+                           host = "localhost",
+                           user = "postgres",
+                           password = "03142131",
+                           port = "5432")
+
+banco = conexao.cursor()
+
+def alterar_senha(novaSenha):
+    global usuarioLogado
+    try: 
+        banco.execute(f''' UPDATE tb_user SET senha_user = '{novaSenha}' WHERE id_user = {usuarioLogado[0]}; ''')
+        conexao.commit()
+        sg.Popup("Senha Atualizada!", font=("Roboto", 12))
+        banco.execute(f''' SELECT * FROM tb_user WHERE id_user = {usuarioLogado[0]} ''')
+        usuarioLogado = banco.fetchone()
+    except:
+        sg.Popup("Um erro ocorreu!", font=("Roboto", 12))
+
+def alterar_email(novoEmail):
+    global usuarioLogado
+    try: 
+        banco.execute(f''' UPDATE tb_user SET email = '{novoEmail}' WHERE id_user = {usuarioLogado[0]}; ''')
+        conexao.commit()
+        sg.Popup("Email atualizado!", font=("Roboto", 12))
+        banco.execute(f''' SELECT * FROM tb_user WHERE id_user = {usuarioLogado[0]} ''')
+        usuarioLogado = banco.fetchone()
+    except:
+        sg.Popup("Email em utilização, favor digitar outro.", font=("Roboto", 12))
 
 def config():
     sg.theme('LightGreen10')
@@ -68,9 +117,12 @@ def config():
                                         break
                                     else:
                                         if event == "Alterar senha":
-                                            if values['-password-'] == values['-repassword-']:
-                                                sg.Popup("Senha alterada com sucesso!")
-                                            continue
+                                            if values['-passwordold-'] == usuarioLogado[3]:
+                                                if values['-password-'] == values['-repassword-']:
+                                                    alterar_senha(values['-password-'])
+                                                continue
+                                            else:
+                                                sg.popup("Senha Incorreta.")
                                         else:
                                             if event == "<< Voltar":
                                                 window.close()
@@ -78,7 +130,7 @@ def config():
                                                 break
                                             else:
                                                 if event == "Alterar e-mail":
-                                                        sg.Popup("E-mail alterado.")
+                                                    alterar_email(values['-email-'])
                                                 continue
 
     window.close()
@@ -130,10 +182,61 @@ def exportar_dados():
                                         break
     window.close()
 
+def popupIdentificacao(planta):
+    sg.theme('LightGreen10')
+
+    response = requests.get(planta['images'][0]['url']['o'])
+    imagem = Image.open(BytesIO(response.content))
+    png_bio = io.BytesIO()
+    imagem.save(png_bio, format='PNG')
+    pngData = png_bio.getvalue()
+
+
+    layout_column = [[sg.Text("Provável identificação", justification='center', font=("Roboto", 20, "bold"), size=(50,1))],
+              [sg.Text("_______________", justification='center', text_color=LINEBREAK)],
+              [sg.Text("Nomes comuns: ", justification='center', font=("Roboto", 17, "bold"))],
+              [sg.Text(nomeComum, font=("Roboto", 14)) for nomeComum in planta['species']['commonNames']],
+              [sg.Image(data=pngData)] ]
+    
+    layout = [[sg.Column(layout_column, element_justification='center')]]
+    
+    window = sg.Window("Identificação", layout, element_justification='center')
+    
+    while True:
+        event, values = window.read()
+
+        if event == sg.WIN_CLOSED:
+            window.close()
+            identificacao()
+            break
+    window.close()
+
+def post(files):
+    global json_result
+    req = requests.Request('POST', url=api_endpoint, files=files, data=data)
+    prepared = req.prepare()
+
+    s = requests.Session()
+    response = s.send(prepared)
+    json_result = json.loads(response.text)
+
+    pprint(response.status_code)
+    pprint(json_result)
+
+    if json_result['results'][0]['score'] > 0.05:
+        popupIdentificacao(json_result['results'][0])
+    else:
+        sg.popup("Planta não identificada")
+
 def identificacao():
     sg.theme('LightGreen10')
     menu_def=[['Menu',['Início', 'Perfil', '!&Identificar', 'Mapa', 'Enciclopedia', 'Sobre', 'Sair']]]
-    layout = [[sg.Menu(menu_def)],]
+    layout = [[sg.Menu(menu_def)],
+                [sg.Text("Choose a PNG file:")],
+                [sg.InputText(key="-FILE_PATH-"), 
+                sg.FileBrowse(initial_folder=working_directory, file_types=[("JPEG Files", "*.jpeg")])],
+                [sg.Button('Submit'), sg.Exit()]]
+    
     window = sg.Window("Identifique uma planta", layout)
 
     while True:
@@ -170,6 +273,15 @@ def identificacao():
                                     window.close()
                                     menu_pos_login()
                                     break
+                                elif event == "Submit":
+                                    address = values["-FILE_PATH-"]
+                                    files = [
+                                        ('images', (address, open(address, 'rb')))
+                                    ]
+                                    print(files)   
+                                    post(files)
+                                    break
+                                    
     window.close()
 
 def enciclopedia():
@@ -265,8 +377,8 @@ def perfil():
     menu_def=[['Menu',['Início', '!&Perfil', 'Identificar', 'Mapa', 'Enciclopedia', 'Sobre', 'Sair']]]
     layout_column=[[sg.Push(), sg.Text("Meu Perfil", font=("Inder", 14, "bold")), sg.Push()],
                    [sg.Push(), sg.Text("________________", font=("Inder", 10), text_color=LINEBREAK), sg.Push()],
-                   [sg.Push(), sg.Text("(Espaço para mostrar username puxado do banco)", font=("Roboto", 12, "bold")), sg.Push()],
-                   [sg.Push(), sg.Text("(Espaço para mostrar o e-mail associado)", font=("Roboto", 10)), sg.Push()],
+                   [sg.Push(), sg.Text(usuarioLogado[1], font=("Roboto", 12, "bold")), sg.Push()],
+                   [sg.Push(), sg.Text(usuarioLogado[2], font=("Roboto", 10)), sg.Push()],
                    [sg.Button("Configurações", font=("Inder", 12)), sg.Button("Exportar dados", font=("Inder", 12))]]
     layout=[[sg.Menu(menu_def)],
             [sg.Column(layout_column, element_justification='center')]
@@ -385,10 +497,10 @@ def sobre():
 def menu_pos_login():
     sg.theme('LightGreen10')
     layout_column = [[sg.Text("ÚLTIMAS DESCOBERTAS", justification='center', font=("Roboto", 20, "bold"))],
-                     [sg.Image(filename='D:/fatec/6o semestre/python/ribercerra_ia/mock_map.PNG')],
+                     [sg.Image(filename=f'{working_directory}\mock_map.PNG')],
                      [sg.Text("_______________", justification='center', text_color=LINEBREAK)],
                      [sg.Text("Angelim-do-Cerrado", font=("Inder", 16), justification='center')],
-                     [sg.Image(filename='D:/fatec/6o semestre/python/ribercerra_ia/angelim.png')],
+                     [sg.Image(filename=f'{working_directory}\\angelim.png')],
                      [sg.Text("Espécie florestal comum no Cerrado.", size=(20,2), justification='center', font=("Inder", 12)), 
                       sg.Text("Leia mais na enciclopédia>>", enable_events=True, font=("Inder", 12, "bold"), text_color=HIPERTEXTO)]]
     menu_def=[['Menu',['!&Início', 'Perfil', 'Identificar', 'Mapa', 'Enciclopedia', 'Sobre', 'Sair']]]
@@ -433,8 +545,31 @@ def menu_pos_login():
                                     break
     window.close()
 
+def insert_account(username, email, password):
+    try:
+        banco.execute(f''' INSERT INTO tb_user (nome_user, email, senha_user) VALUES ('{username}','{email}','{password}'); ''')
+        conexao.commit()
+        sg.Popup("Usuário cadastrado!", font=("Roboto", 12))
+    except:
+        sg.Popup("Um erro ocorreu", font=("Roboto", 12))
+
+
+def verifica_login(email, password):
+    global usuarioLogado
+    for usuario in usuarios:
+        print(usuario)
+        if usuario[2] == email:
+            if usuario[3] == password: 
+                usuarioLogado = usuario
+                return True
+            else:
+                return False
+    return False
+
+            
+
 def create_account():
-    global username, password
+    global username, password, email
     sg.theme('LightGreen10')
     layout = [[sg.Text("Cadastro", size =(28, 1), justification='center', font=("Inder", 16, "bold"))],
              [sg.Text("E-mail", size =(14, 1),font=("Inder", 12)), sg.InputText(key='-email-', font=("Inder", 12))],
@@ -444,6 +579,8 @@ def create_account():
              [sg.Button("Registre-se", font=("Roboto", 14, "bold")), sg.Button("Cancelar", font=("Roboto", 14))]]
 
     window = sg.Window("Cadastro de Usuário", layout)
+
+    print(conexao.status)
 
     while True:
         event,values = window.read()
@@ -459,7 +596,8 @@ def create_account():
                     sg.popup_error("Valores inválidos. Por favor, tente novamente", font=("Roboto", 12))
                     continue
                 elif values['-email-'] == values['-remail-']:
-                    sg.Popup("Usuário cadastrado!", font=("Roboto", 12))
+                    email = values['-email-']
+                    insert_account(username, email, password)
                     window.close()
                     menu_inicial()
                     break
@@ -469,14 +607,18 @@ def create_account():
     window.close()
 
 def login():
-    global username,password
+    global username,password,usuarios
     sg.theme("LightGreen10")
     layout = [[sg.Text("Log In", size =(28, 1), font=("Inder", 16, "bold"))],
-            [sg.Text("Nome de usuário", size =(14, 1), font=("Inder", 12)),sg.InputText(key='-usrnm-', font=("Inder", 12))],
+            [sg.Text("Email", size =(14, 1), font=("Inder", 12)),sg.InputText(key='-email-', font=("Inder", 12))],
             [sg.Text("Senha", size =(14, 1), font=("Inder", 12)),sg.InputText(key='-pwd-', password_char='*', font=12)],
             [sg.Button('Ok'),sg.Button('Cancelar')]]
 
     window = sg.Window("Log In", layout)
+
+    banco.execute(''' SELECT * FROM tb_user ''')
+    usuarios = banco.fetchall()
+    print(usuarios)
 
     while True:
         event,values = window.read()
@@ -489,12 +631,12 @@ def login():
                 break
             else:
                 if event == "Ok":
-                    if values['-usrnm-'] == username and values['-pwd-'] == password:
+                    if verifica_login(values['-email-'], values['-pwd-']):
                         sg.popup("Bem vindo ao RiberCerra!")
                         window.close()
                         menu_pos_login()
                         break
-                    elif values['-usrnm-'] != username or values['-pwd-'] != password:
+                    else:
                         sg.popup("Login inválido. Tente novamente.")
     window.close()
 
