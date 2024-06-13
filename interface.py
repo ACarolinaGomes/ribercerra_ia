@@ -5,6 +5,8 @@ import io
 import json
 import psycopg2
 import requests
+import datetime
+import zipfile
 from io import BytesIO
 from PIL import Image
 from pprint import pprint
@@ -15,6 +17,8 @@ API_KEY = "2b10Xq0KJm9iGzfiEiSUf6qf6"
 PROJECT = "all"
 api_endpoint = f"https://my-api.plantnet.org/v2/identify/{PROJECT}?api-key={API_KEY}&lang=pt&include-related-images=true"
 data = { 'organs': ['auto'] }
+
+import_endpoint = "https://api.jsonbin.io/v3/qs/666b69c5ad19ca34f878a56f"
 
 username = ''
 password = ''
@@ -78,6 +82,7 @@ def config():
 
     while True:
         event, values = window.read()
+        
         if event == 'Sair':
             window.close()
             menu_inicial()
@@ -135,7 +140,6 @@ def config():
 
     window.close()
 
-def exportar_dados():
     sg.theme('LightGreen10')
     menu_def=[['Menu',['Início', 'Perfil', 'Identificar', 'Mapa', 'Enciclopedia', 'Sobre', 'Sair']]]
     layout = [[sg.Menu(menu_def)],]
@@ -196,7 +200,8 @@ def popupIdentificacao(planta):
               [sg.Text("_______________", justification='center', text_color=LINEBREAK)],
               [sg.Text("Nomes comuns: ", justification='center', font=("Roboto", 17, "bold"))],
               [sg.Text(nomeComum, font=("Roboto", 14)) for nomeComum in planta['species']['commonNames']],
-              [sg.Image(data=pngData)] ]
+              [sg.Image(data=pngData, size=(700, 500))],
+              [sg.Button("Voltar", font=("Inder", 12))] ]
     
     layout = [[sg.Column(layout_column, element_justification='center')]]
     
@@ -209,6 +214,9 @@ def popupIdentificacao(planta):
             window.close()
             identificacao()
             break
+        elif event == "Voltar":
+            window.close()
+            identificacao()
     window.close()
 
 def post(files):
@@ -224,18 +232,21 @@ def post(files):
     pprint(json_result)
 
     if json_result['results'][0]['score'] > 0.05:
+        insert_info_imagem(usuarioLogado[0], 1, files[0][1][0], True, datetime.datetime.now())
         popupIdentificacao(json_result['results'][0])
     else:
         sg.popup("Planta não identificada")
-
+        insert_info_imagem(usuarioLogado[0], 1, files[0][1][0], False, datetime.datetime.now())
+        identificacao()
+    
 def identificacao():
     sg.theme('LightGreen10')
     menu_def=[['Menu',['Início', 'Perfil', '!&Identificar', 'Mapa', 'Enciclopedia', 'Sobre', 'Sair']]]
     layout = [[sg.Menu(menu_def)],
-                [sg.Text("Choose a PNG file:")],
+                [sg.Text("Escolha uma imagem:")],
                 [sg.InputText(key="-FILE_PATH-"), 
-                sg.FileBrowse(initial_folder=working_directory, file_types=[("JPEG Files", "*.jpeg")])],
-                [sg.Button('Submit'), sg.Exit()]]
+                sg.FileBrowse(initial_folder=working_directory, file_types=[(("JPEG, JPG, PNG", "*.jpeg *.jpg *.png"))])],
+                [sg.Button('Enviar'), sg.Button('Voltar')]]
     
     window = sg.Window("Identifique uma planta", layout)
 
@@ -273,21 +284,98 @@ def identificacao():
                                     window.close()
                                     menu_pos_login()
                                     break
-                                elif event == "Submit":
+                                elif event == "Enviar":
                                     address = values["-FILE_PATH-"]
                                     files = [
                                         ('images', (address, open(address, 'rb')))
-                                    ]
-                                    print(files)   
+                                    ]  
                                     post(files)
+                                    window.close()
+                                    break
+                                elif event == "Voltar":
+                                    window.close()
+                                    menu_pos_login()
                                     break
                                     
     window.close()
 
+def alterar_planta(nomePopular, nomeCientifico, descricao, id):
+    sg.theme('LightGreen10')
+    layout = [[sg.Text("Alterar Informações da Planta", size =(28, 1), justification='center', font=("Inder", 16, "bold"))],
+             [sg.Text("Nome Científico", size =(14, 1),font=("Inder", 12)), sg.InputText(nomeCientifico,key='-cientifico-', font=("Inder", 12))],
+             [sg.Text("Nome Popular", size =(14, 1), font=("Inder", 12)), sg.InputText(nomePopular, key='-popular-', font=("Inder", 12))],
+             [sg.Text("Descrição", size =(14, 1), font=("Inder", 12)), sg.Multiline(descricao, key='-descricao-', font=("Inder", 12), size=(40,10))],
+             [sg.Button("Salvar", font=("Roboto", 14, "bold")), sg.Button("Cancelar", font=("Roboto", 14))]]
+
+    window = sg.Window("Cadastro de Planta", layout)
+
+    print(conexao.status)
+
+    while True:
+        event,values = window.read()
+        if event == 'Cancelar':
+            window.close()
+            enciclopedia()
+            break
+        else:
+            if event == "Salvar":
+                    alter_planta(values['-cientifico-'], values['-popular-'], values['-descricao-'], id)
+                    window.close()
+                    enciclopedia()
+                    break
+            else:
+                if sg.WIN_CLOSED:
+                    break
+    window.close()
+
+def sobre_planta(nomePopular, nomeCientifico, descricao, id):
+    sg.theme('LightGreen10')
+
+
+    layout_column = [[sg.Text(nomePopular, justification='center', font=("Roboto", 20, "bold"), size=(50,1))],
+              [sg.Text("_______________", justification='center', text_color=LINEBREAK)],
+              [sg.Text("Nome Científico: ", justification='start', font=("Roboto", 14, "bold")), sg.Text(nomeCientifico, justification='start', font=("Roboto", 13))],
+              [sg.Text("Descrição: ", justification='start', font=("Roboto", 14, "bold")), sg.Text(descricao, justification='start', font=("Roboto", 13))],
+              [sg.Button("Voltar", font=("Roboto", 14, "bold")), sg.Button("Alterar", font=("Roboto", 14, "bold"))]
+              ]
+    
+    layout = [[sg.Column(layout_column, element_justification='center')]]
+    
+    window = sg.Window("RiberCerra", layout, element_justification='center')
+    
+    while True:
+        event, values = window.read()
+
+        if event == sg.WIN_CLOSED:
+            window.close()
+        elif event == "Voltar":
+            window.close()
+            enciclopedia()
+            break
+        elif event == "Alterar":
+            window.close()
+            alterar_planta(nomePopular, nomeCientifico, descricao, id)
+            break
+    window.close()
+
 def enciclopedia():
+    cabecalho = ['ID', 'Nome Científico', 'Nome Popular', 'Descrição']
+
+    banco.execute(''' SELECT * FROM tb_plantas ''')
+
+    dados = banco.fetchall()
+    print(dados)
+
+    layout_column = [[sg.Text("Enciclopédia", justification='center', font=("Roboto", 20, "bold"), size=(50,1))],
+              [sg.Text("_______________", justification='center', text_color=LINEBREAK)],
+              [sg.Button("Cadastrar Planta", font=("Roboto", 14, "bold"))],
+              [sg.Table(dados, headings=cabecalho, justification='left', key='-tabela-', enable_events=True)],
+            ]
+
     sg.theme('LightGreen10')
     menu_def=[['Menu',['Início', 'Perfil', 'Identificar', 'Mapa', '!&Enciclopedia', 'Sobre', 'Sair']]]
-    layout = [[sg.Menu(menu_def)],]
+    layout = [[sg.Menu(menu_def)], 
+              [sg.Column(layout_column, element_justification='center')]]
     window = sg.Window("RiberCerra", layout)
 
     while True:
@@ -323,6 +411,17 @@ def enciclopedia():
                                 if event == "Início":
                                     window.close()
                                     menu_pos_login()
+                                else:
+                                    if event == "Cadastrar Planta":
+                                        window.close()
+                                        create_planta()
+                                    else:
+                                        if event == "-tabela-":
+                                            dados_selecionados = [dados[linha] for linha in values[event]]
+                                            window.close()
+                                            print(dados_selecionados)
+                                            print(dados_selecionados[0][3])
+                                            sobre_planta(dados_selecionados[0][2], dados_selecionados[0][1], dados_selecionados[0][3], dados_selecionados[0][0])
                                     break
     window.close()
 
@@ -372,6 +471,141 @@ def mapa():
                                     break
     window.close()
 
+def exportar():
+    nomeZipUsuarios = 'Usuarios'
+    nomeZipPlantas = 'Plantas'
+    nomeZipImagens = 'Imagens'
+
+    banco.execute(''' SELECT * FROM tb_user ''')
+    dadosUsuarios = banco.fetchall()
+
+    banco.execute(''' SELECT * FROM tb_plantas ''')
+    dadosPlantas = banco.fetchall()
+
+    banco.execute(''' SELECT * FROM tb_imagens ''')
+    dadosImagens = banco.fetchall()
+
+    with zipfile.ZipFile("Dados.zip", "a") as zfp:
+        zfp.writestr(nomeZipUsuarios, json.dumps(dadosUsuarios, indent=1))
+        zfp.writestr(nomeZipPlantas, json.dumps(dadosPlantas, indent=1))
+        zfp.writestr(nomeZipImagens, json.dumps(dadosImagens, indent=1, default=str))
+
+def importar():
+    sg.theme('LightGreen10')
+    req = requests.Request('GET', url=import_endpoint)
+    prepared = req.prepare()
+
+    s = requests.Session()
+    response = s.send(prepared)
+    json_result = json.loads(response.text)
+
+    pprint(response.status_code)
+    pprint(json_result['record'])
+
+    insert_planta(json_result['record']['nm_cientifico'], json_result['record']['nm_popular'], json_result['record']['descricao'])
+
+def delete_logs(id):
+    try:
+        banco.execute(f''' DELETE FROM tb_imagens WHERE id_imagem = {id} ''')
+        conexao.commit()
+        sg.Popup("Log apagado.", font=("Roboto", 12))
+    except:
+        sg.Popup("Um erro ocorreu", font=("Roboto", 12))  
+
+def deletar_logs(id, janela):
+    layout_column = [[sg.Text("Deseja deletar este log?", justification='center', font=("Roboto", 20, "bold"), size=(50,1))],
+              [sg.Button("Sim", font=("Inder", 12)), sg.Button("Não", font=("Inder", 12))] ]
+    
+    layout = [[sg.Column(layout_column, element_justification='center')]]
+    
+    window = sg.Window("Identificação", layout, element_justification='center')
+
+    while True:
+        event, values = window.read()
+
+        if event == sg.WIN_CLOSED:
+            window.close()
+            visualizar_logs()
+            break
+        elif event == "Sim":
+            window.close()
+            delete_logs(id)
+            janela.close()
+            visualizar_logs()
+            break
+        elif event == "Não":
+            window.close()
+            janela.close()
+            visualizar_logs()
+            break
+        
+    
+
+def visualizar_logs():
+    cabecalho = ['ID', 'ID User', 'ID Planta', 'Imagem', 'Identificado?', 'Data de Envio']
+
+    banco.execute(''' SELECT * FROM tb_imagens ''')
+
+    dados = banco.fetchall()
+    print(dados)
+
+    layout_column = [[sg.Text("Usuários", justification='center', font=("Roboto", 20, "bold"), size=(50,1))],
+              [sg.Text("_______________", justification='center', text_color=LINEBREAK)],
+              [sg.Table(dados, headings=cabecalho, justification='left', key='-tabela-', enable_events=True)],
+              [sg.Button("Voltar", font=("Inder", 12))]
+            ]
+
+    sg.theme('LightGreen10')
+    menu_def=[['Menu',['Início', 'Perfil', 'Identificar', 'Mapa', '!&Enciclopedia', 'Sobre', 'Sair']]]
+    layout = [[sg.Menu(menu_def)], 
+              [sg.Column(layout_column, element_justification='center')]]
+    window = sg.Window("RiberCerra", layout)
+
+    while True:
+        event, values = window.read()
+        if event == 'Voltar':
+            window.close()
+            perfil()
+            break
+        elif event == sg.WIN_CLOSED:
+            break
+        elif event == "-tabela-":
+            dados_selecionados = [dados[linha] for linha in values[event]]
+            deletar_logs(dados_selecionados[0][0],window)
+            break
+
+    window.close()
+
+def visualizar_usuarios():
+    cabecalho = ['ID', 'Nome', 'email']
+
+    banco.execute(''' SELECT * FROM tb_user ''')
+
+    dados = banco.fetchall()
+    print(dados)
+
+    layout_column = [[sg.Text("Usuários", justification='center', font=("Roboto", 20, "bold"), size=(50,1))],
+              [sg.Text("_______________", justification='center', text_color=LINEBREAK)],
+              [sg.Table(dados, headings=cabecalho, justification='left', key='-tabela-', enable_events=True)],
+              [sg.Button("Voltar", font=("Inder", 12))]
+            ]
+
+    sg.theme('LightGreen10')
+    menu_def=[['Menu',['Início', 'Perfil', 'Identificar', 'Mapa', '!&Enciclopedia', 'Sobre', 'Sair']]]
+    layout = [[sg.Menu(menu_def)], 
+              [sg.Column(layout_column, element_justification='center')]]
+    window = sg.Window("RiberCerra", layout)
+
+    while True:
+        event, values = window.read()
+        if event == 'Voltar':
+            window.close()
+            perfil()
+            break
+        elif event == sg.WIN_CLOSED:
+            break
+    window.close()
+
 def perfil():
     sg.theme('LightGreen10')
     menu_def=[['Menu',['Início', '!&Perfil', 'Identificar', 'Mapa', 'Enciclopedia', 'Sobre', 'Sair']]]
@@ -379,7 +613,9 @@ def perfil():
                    [sg.Push(), sg.Text("________________", font=("Inder", 10), text_color=LINEBREAK), sg.Push()],
                    [sg.Push(), sg.Text(usuarioLogado[1], font=("Roboto", 12, "bold")), sg.Push()],
                    [sg.Push(), sg.Text(usuarioLogado[2], font=("Roboto", 10)), sg.Push()],
-                   [sg.Button("Configurações", font=("Inder", 12)), sg.Button("Exportar dados", font=("Inder", 12))]]
+                   [sg.Button("Configurações", font=("Inder", 12)), sg.Button("Exportar dados", font=("Inder", 12))],
+                   [sg.Button("Importar Dados", font=("Inder", 12)), sg.Button("Visualizar usuarios", font=("Inder", 12))],
+                   [sg.Button("Visualizar logs de Imagem", font=("Inder", 12))]]
     layout=[[sg.Menu(menu_def)],
             [sg.Column(layout_column, element_justification='center')]
             ]
@@ -426,9 +662,17 @@ def perfil():
                                         break
                                     else:
                                         if event == "Exportar dados":
+                                            exportar()
+                                        elif event == "Importar Dados":
+                                            importar()
+                                        elif event == "Visualizar usuarios":
                                             window.close()
-                                            exportar_dados()
+                                            visualizar_usuarios()
                                             break
+                                        elif event == "Visualizar logs de Imagem":
+                                            window.close()
+                                            visualizar_logs()
+                                            
     window.close()
 
 def sobre():
@@ -443,7 +687,7 @@ def sobre():
                      [sg.Text("Nesta versão, pretendemos demonstrar a capacidade de reconhecimento de\nflora por meio da API Pl@ntNet e suas limitações.", font=("Inder", 12))],
                      [sg.Push(), sg.Text("______________________________", font=("Inder", 10), text_color=LINEBREAK), sg.Push()],
                      [sg.Text("Sobre o Pl@ntNet", font=("Roboto", 14, "bold"), text_color=HIPERTEXTO, enable_events=True)],
-                     [sg.Image(filename="D:/fatec/6o semestre/python/ribercerra_ia/Plantnet_logo.png")],
+                     [sg.Image(filename=f"{working_directory}\Plantnet_logo.png")],
                      [sg.Text("Pl@ntNet é um projeto de ciências com foco na disseminação de conhecimento civil.", font=("Inder", 10), text_color=HIPERTEXTO)]
                      ]
     layout=[[sg.Menu(menu_def)],
@@ -553,6 +797,29 @@ def insert_account(username, email, password):
     except:
         sg.Popup("Um erro ocorreu", font=("Roboto", 12))
 
+def insert_planta(nm_cientifico, nm_popular, descricao):
+    try:
+        banco.execute(f''' INSERT INTO tb_plantas (nm_cientifico, nm_popular, desc_planta) VALUES ('{nm_cientifico}','{nm_popular}','{descricao}'); ''')
+        conexao.commit()
+        sg.Popup("Planta cadastrada!", font=("Roboto", 12))
+    except:
+        sg.Popup("Um erro ocorreu", font=("Roboto", 12))
+
+def alter_planta(nm_cientifico, nm_popular, descricao, id):
+    try:
+        banco.execute(f''' UPDATE tb_plantas SET nm_cientifico = '{nm_cientifico}', nm_popular = '{nm_popular}', desc_planta = '{descricao}' WHERE id_planta = {id}; ''')
+        conexao.commit()
+        sg.Popup("Planta alterada!", font=("Roboto", 12))
+    except:
+        sg.Popup("Um erro ocorreu", font=("Roboto", 12))
+
+def insert_info_imagem(idUsuario, idPlanta, imagem, identificado, dt_envio):
+    try:
+        banco.execute(f''' INSERT INTO tb_imagens (id_user, id_planta, end_imagem, identificado, dt_envio) VALUES ({idUsuario},{idPlanta},'{os.path.basename(imagem)}',{identificado},'{dt_envio}'); ''')
+        conexao.commit()
+        sg.Popup("Dados atualizados", font=("Roboto", 12))
+    except:
+        sg.Popup("Um erro ocorreu", font=("Roboto", 12))
 
 def verifica_login(email, password):
     global usuarioLogado
@@ -566,7 +833,34 @@ def verifica_login(email, password):
                 return False
     return False
 
-            
+def create_planta():
+    sg.theme('LightGreen10')
+    layout = [[sg.Text("Cadastro da Planta", size =(28, 1), justification='center', font=("Inder", 16, "bold"))],
+             [sg.Text("Nome Científico", size =(14, 1),font=("Inder", 12)), sg.InputText(key='-cientifico-', font=("Inder", 12))],
+             [sg.Text("Nome Popular", size =(14, 1), font=("Inder", 12)), sg.InputText(key='-popular-', font=("Inder", 12))],
+             [sg.Text("Descrição", size =(14, 1), font=("Inder", 12)), sg.Multiline(key='-descricao-', font=("Inder", 12), size=(40,10))],
+             [sg.Button("Salvar", font=("Roboto", 14, "bold")), sg.Button("Cancelar", font=("Roboto", 14))]]
+
+    window = sg.Window("Cadastro de Planta", layout)
+
+    print(conexao.status)
+
+    while True:
+        event,values = window.read()
+        if event == 'Cancelar':
+            window.close()
+            enciclopedia()
+            break
+        else:
+            if event == "Salvar":
+                    insert_planta(values['-cientifico-'], values['-popular-'], values['-descricao-'])
+                    window.close()
+                    enciclopedia()
+                    break
+            else:
+                if sg.WIN_CLOSED:
+                    break
+    window.close()
 
 def create_account():
     global username, password, email
@@ -649,6 +943,7 @@ def menu_inicial():
     layout = [[sg.Titlebar("RiberCerra")],
         [sg.Column(layout_column, element_justification='center')]]
     window = sg.Window("RiberCerra", layout)
+
     while True:
         event, values = window.read()
         if event == sg.WIN_CLOSED or event=="Sair":
