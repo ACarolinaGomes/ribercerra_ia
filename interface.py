@@ -18,7 +18,7 @@ PROJECT = "all"
 api_endpoint = f"https://my-api.plantnet.org/v2/identify/{PROJECT}?api-key={API_KEY}&lang=pt&include-related-images=true"
 data = { 'organs': ['auto'] }
 
-import_endpoint = "https://api.jsonbin.io/v3/qs/666b69c5ad19ca34f878a56f"
+import_endpoint = "https://api.jsonbin.io/v3/qs/666cac0fad19ca34f8791b5d"
 
 username = ''
 password = ''
@@ -228,16 +228,18 @@ def post(files):
     response = s.send(prepared)
     json_result = json.loads(response.text)
 
+    print('------------------------------------------------------')
     pprint(response.status_code)
     pprint(json_result)
+    print('------------------------------------------------------')
 
-    if json_result['results'][0]['score'] > 0.05:
-        insert_info_imagem(usuarioLogado[0], 1, files[0][1][0], True, datetime.datetime.now())
-        popupIdentificacao(json_result['results'][0])
-    else:
+    if response.status_code == 404 or json_result['results'][0]['score'] < 0.05:
         sg.popup("Planta não identificada")
         insert_info_imagem(usuarioLogado[0], 1, files[0][1][0], False, datetime.datetime.now())
-        identificacao()
+    else:
+        insert_info_imagem(usuarioLogado[0], 1, files[0][1][0], True, datetime.datetime.now())
+        popupIdentificacao(json_result['results'][0])
+
     
 def identificacao():
     sg.theme('LightGreen10')
@@ -290,8 +292,6 @@ def identificacao():
                                         ('images', (address, open(address, 'rb')))
                                     ]  
                                     post(files)
-                                    window.close()
-                                    break
                                 elif event == "Voltar":
                                     window.close()
                                     menu_pos_login()
